@@ -1,0 +1,668 @@
+import java.awt.*;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.geom.Ellipse2D;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import javax.imageio.ImageIO;
+import javax.swing.*;
+
+public class App extends JPanel {
+
+    // --- GameCard Class (remains the same) ---
+    private static class GameCard {
+        BufferedImage actionFace; // The main card image (e.g., 9_Market.png)
+        BufferedImage pointFace;  // The corresponding point card image (e.g., B_Market.png)
+        String type;              // Extracted type (e.g., "Market") to link images
+
+        public GameCard(BufferedImage actionFace, BufferedImage pointFace, String type) {
+            this.actionFace = actionFace;
+            this.pointFace = pointFace;
+            this.type = type;
+        }
+
+        public BufferedImage getActionFace() { return actionFace; }
+        public BufferedImage getPointFace() { return pointFace; }
+        public String getType() { return type; }
+    }
+    // --- End GameCard Class ---
+
+    private BufferedImage backgroundImage;
+    private List<GameCard> allGameCards = new ArrayList<>(); // All loaded action/point card pairs
+
+    // Modified: Separate lists for the two columns of cards
+    private List<GameCard> currentActionCards = new ArrayList<>(); // The 3 GameCard objects on the left (number side)
+    private List<GameCard> currentPointCards = new ArrayList<>();  // The 3 GameCard objects on the right (point side)
+
+    private List<Rectangle> houseRects = new ArrayList<>();
+    private List<Rectangle> pointCircleRects = new ArrayList<>();
+    private List<Rectangle> poolRects = new ArrayList<>();
+    private List<String> houseNumbers = new ArrayList<>();
+    private List<Boolean> pointCirclesCrossedOff = new ArrayList<>();
+    private List<Boolean> poolsMarked = new ArrayList<>();
+    private List<LineSegment> drawnLines = new ArrayList<>();
+    private Point lineStartPoint = null;
+    private int currentLineThickness = 5;
+    private Font houseFont = new Font("Arial", Font.BOLD, 16);
+    private boolean currentlyEditingHouse = false;
+    private int editingHouseIndex = -1;
+    private JFrame frame;
+
+    private String mainBoardImageFilePath = "//insert file path here";
+    private String supplementaryImageFolderPath = "//insert file path here";
+    private String pointImageFolderPath = "//insert file path here";
+
+
+    private int blankSpaceWidth = 600; // This will now be dynamically calculated based on actual content
+    private int cardDisplayWidth = 210;
+    private int cardDisplayHeight = 285;
+    private int cardAreaPaddingLeft = 15;
+
+    private final int NUM_CARDS_TO_DISPLAY = 3; // Number of action and point cards to show at once
+
+    private int padding = 10; // Padding between cards (vertical) and between card sets (horizontal)
+
+    // Inner class to represent a line segment
+    private static class LineSegment {
+        Point start;
+        Point end;
+        int thickness;
+
+        public LineSegment(Point start, Point end, int thickness) {
+            this.start = start;
+            this.end = end;
+            this.thickness = thickness;
+        }
+    }
+
+    // Method to get PNG file paths from a folder
+    private List<String> getPngFilePaths(String folderPath) {
+        List<String> pngFilePaths = new ArrayList<>();
+        File folder = new File(folderPath);
+
+        if (folder.isDirectory()) {
+            File[] files = folder.listFiles();
+            if (files != null) {
+                for (File file : files) {
+                    if (file.isFile() && file.getName().toLowerCase().endsWith(".png")) {
+                        pngFilePaths.add(file.getAbsolutePath());
+                    }
+                }
+            }
+        } else {
+            System.err.println("Error: The provided path is not a directory or does not exist: " + folderPath);
+        }
+        return pngFilePaths;
+    }
+
+    // Constructor to set up the game board and UI
+    public App() {
+        // --- Load the main game board image ---
+        try {
+            File imageFile = new File(mainBoardImageFilePath);
+            if (!imageFile.exists()) {
+                JOptionPane.showMessageDialog(this, "Error: The main board image file '" + mainBoardImageFilePath + "' does not exist. Please make sure the file is in the correct location or update the file path in the code.", "Main Image Load Error", JOptionPane.ERROR_MESSAGE);
+                backgroundImage = null;
+            } else {
+                backgroundImage = ImageIO.read(imageFile);
+                System.out.println("Loaded main background image: " + imageFile.getName());
+            }
+
+        } catch (IOException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Error loading the main board image: " + e.getMessage(), "Main Image Load Error", JOptionPane.ERROR_MESSAGE);
+            backgroundImage = null;
+        }
+
+        // --- Load ALL action and point images and pair them into GameCard objects ---
+        loadAllGameCards();
+        if(allGameCards.isEmpty()) {
+            System.err.println("Warning: No GameCards loaded. Check supplementary and points image folders.");
+        } else {
+            // Select initial set of action cards (point cards will be empty initially)
+            dealInitialCards();
+        }
+
+
+        // Define the regions for houses, point circles, and pools
+        // These coordinates are based on the "Welcome To..." game board image.
+        // **IMPORTANT: These coordinates are approximate and may need fine-tuning.**
+        // **You'll likely need to adjust these values to match your specific image.**
+
+        // House rectangles (adjust as needed for your image)
+        houseRects.add(new Rectangle(163, 279, 40, 40)); //1
+        houseRects.add(new Rectangle(222, 279, 40, 40)); //2
+        houseRects.add(new Rectangle(283, 279, 40, 40)); //3
+        houseRects.add(new Rectangle(343, 279, 40, 40)); //4
+        houseRects.add(new Rectangle(404, 279, 40, 40)); //5
+        houseRects.add(new Rectangle(465, 279, 40, 40)); //6
+        houseRects.add(new Rectangle(524, 279, 40, 40)); //7
+        houseRects.add(new Rectangle(583, 279, 40, 40)); //8
+        houseRects.add(new Rectangle(642, 279, 40, 40)); //9
+        houseRects.add(new Rectangle(703, 279, 40, 40)); //10
+        houseRects.add(new Rectangle(763, 279, 40, 40)); //11
+
+        houseRects.add(new Rectangle(104, 443, 40, 40)); //1
+        houseRects.add(new Rectangle(163, 443, 40, 40)); //2
+        houseRects.add(new Rectangle(222, 443, 40, 40)); //3
+        houseRects.add(new Rectangle(283, 443, 40, 40)); //4
+        houseRects.add(new Rectangle(343, 443, 40, 40)); //5
+        houseRects.add(new Rectangle(404, 443, 40, 40)); //6
+        houseRects.add(new Rectangle(465, 443, 40, 40)); //7
+        houseRects.add(new Rectangle(524, 443, 40, 40)); //8
+        houseRects.add(new Rectangle(583, 443, 40, 40)); //9
+        houseRects.add(new Rectangle(642, 443, 40, 40)); //10
+        houseRects.add(new Rectangle(703, 443, 40, 40)); //11
+        houseRects.add(new Rectangle(763, 443, 40, 40)); //12
+
+        //town name
+        houseRects.add(new Rectangle(75, 130, 80, 80));
+
+        //plans
+        houseRects.add(new Rectangle(26, 585, 80, 80));
+        houseRects.add(new Rectangle(26, 656, 80, 80));
+        houseRects.add(new Rectangle(26, 725, 80, 80));
+
+        //park fills
+        houseRects.add(new Rectangle(100, 635, 80, 80));
+        houseRects.add(new Rectangle(100, 680, 80, 80));
+        houseRects.add(new Rectangle(100, 725, 80, 80));
+
+        //final point circles
+        houseRects.add(new Rectangle(26, 792, 80, 80));
+        houseRects.add(new Rectangle(100, 792, 80, 80));
+        houseRects.add(new Rectangle(180, 792, 80, 80));
+        houseRects.add(new Rectangle(280, 792, 80, 80));
+
+        houseRects.add(new Rectangle(380, 802, 60, 60));
+        houseRects.add(new Rectangle(420, 802, 60, 60));
+        houseRects.add(new Rectangle(460, 802, 60, 60));
+        houseRects.add(new Rectangle(500, 802, 60, 60));
+        houseRects.add(new Rectangle(546, 802, 60, 60));
+        houseRects.add(new Rectangle(590, 802, 60, 60));
+
+        houseRects.add(new Rectangle(675, 802, 60, 60));
+        houseRects.add(new Rectangle(755, 802, 60, 60));
+        houseRects.add(new Rectangle(815, 802, 60, 60));
+
+
+        // Point circle rectangles (adjust as needed)
+        //construction
+        pointCircleRects.add(new Rectangle(292, 630, 20, 20));
+        pointCircleRects.add(new Rectangle(292, 666, 20, 20));
+        pointCircleRects.add(new Rectangle(292, 702, 20, 20));
+        pointCircleRects.add(new Rectangle(292, 735, 20, 20));
+
+        pointCircleRects.add(new Rectangle(328, 630, 20, 20));
+        pointCircleRects.add(new Rectangle(328, 666, 20, 20));
+        pointCircleRects.add(new Rectangle(328, 702, 20, 20));
+        pointCircleRects.add(new Rectangle(328, 735, 20, 20));
+
+        pointCircleRects.add(new Rectangle(310, 648, 20, 20));
+        pointCircleRects.add(new Rectangle(310, 683, 20, 20));
+        pointCircleRects.add(new Rectangle(310, 718, 20, 20));
+
+        pointCircleRects.add(new Rectangle(283, 767, 20, 20));
+        pointCircleRects.add(new Rectangle(311, 767, 20, 20));
+        pointCircleRects.add(new Rectangle(338, 767, 20, 20));
+
+
+        //pools
+        pointCircleRects.add(new Rectangle(200, 645, 20, 20));
+        pointCircleRects.add(new Rectangle(200, 675, 20, 20));
+        pointCircleRects.add(new Rectangle(200, 705, 20, 20));
+        pointCircleRects.add(new Rectangle(200, 735, 20, 20));
+        pointCircleRects.add(new Rectangle(200, 765, 20, 20));
+
+        pointCircleRects.add(new Rectangle(228, 645, 20, 20));
+        pointCircleRects.add(new Rectangle(228, 675, 20, 20));
+        pointCircleRects.add(new Rectangle(228, 705, 20, 20));
+        pointCircleRects.add(new Rectangle(228, 735, 20, 20));
+
+        //markets
+        pointCircleRects.add(new Rectangle(404, 685, 20, 20));
+
+        pointCircleRects.add(new Rectangle(445, 671, 20, 20));
+        pointCircleRects.add(new Rectangle(445, 698, 20, 20));
+
+        pointCircleRects.add(new Rectangle(484, 656, 20, 20));
+        pointCircleRects.add(new Rectangle(484, 681, 20, 20));
+        pointCircleRects.add(new Rectangle(484, 708, 20, 20));
+
+        pointCircleRects.add(new Rectangle(524, 642, 20, 20));
+        pointCircleRects.add(new Rectangle(525, 666, 20, 20));
+        pointCircleRects.add(new Rectangle(525, 693, 20, 20));
+        pointCircleRects.add(new Rectangle(525, 718, 20, 20));
+
+        pointCircleRects.add(new Rectangle(566, 626, 20, 20));
+        pointCircleRects.add(new Rectangle(566, 654, 20, 20));
+        pointCircleRects.add(new Rectangle(566, 679, 20, 20));
+        pointCircleRects.add(new Rectangle(566, 703, 20, 20));
+
+        pointCircleRects.add(new Rectangle(605, 615, 20, 20));
+        pointCircleRects.add(new Rectangle(605, 640, 20, 20));
+        pointCircleRects.add(new Rectangle(605, 666, 20, 20));
+        pointCircleRects.add(new Rectangle(605, 692, 20, 20));
+
+        //bis
+        pointCircleRects.add(new Rectangle(678, 617, 20, 20));
+        pointCircleRects.add(new Rectangle(678, 653, 20, 20));
+        pointCircleRects.add(new Rectangle(678, 693, 20, 20));
+        pointCircleRects.add(new Rectangle(678, 728, 20, 20));
+        pointCircleRects.add(new Rectangle(678, 763, 20, 20));
+
+        pointCircleRects.add(new Rectangle(710, 618, 20, 20));
+        pointCircleRects.add(new Rectangle(710, 653, 20, 20));
+        pointCircleRects.add(new Rectangle(711, 692, 20, 20));
+        pointCircleRects.add(new Rectangle(710, 728, 20, 20));
+
+        //roundabouts
+        pointCircleRects.add(new Rectangle(772, 560, 20, 20));
+        pointCircleRects.add(new Rectangle(772, 595, 20, 20));
+
+        pointCircleRects.add(new Rectangle(772, 667, 20, 20));
+        pointCircleRects.add(new Rectangle(772, 702, 20, 20));
+        pointCircleRects.add(new Rectangle(772, 737, 20, 20));
+
+        //parks
+        pointCircleRects.add(new Rectangle(718, 46, 20, 20));
+        pointCircleRects.add(new Rectangle(750, 46, 20, 20));
+        pointCircleRects.add(new Rectangle(778, 46, 20, 20));
+
+        pointCircleRects.add(new Rectangle(686, 207, 20, 20));
+        pointCircleRects.add(new Rectangle(718, 207, 20, 20));
+        pointCircleRects.add(new Rectangle(750, 207, 20, 20));
+        pointCircleRects.add(new Rectangle(778, 207, 20, 20));
+
+        pointCircleRects.add(new Rectangle(656, 368, 20, 20));
+        pointCircleRects.add(new Rectangle(686, 368, 20, 20));
+        pointCircleRects.add(new Rectangle(718, 368, 20, 20));
+        pointCircleRects.add(new Rectangle(750, 368, 20, 20));
+        pointCircleRects.add(new Rectangle(778, 368, 20, 20));
+
+
+        // Pool rectangles (adjust as needed)
+        poolRects.add(new Rectangle(343, 85, 30, 30));
+        poolRects.add(new Rectangle(581, 85, 30, 30));
+        poolRects.add(new Rectangle(645, 85, 30, 30));
+
+        poolRects.add(new Rectangle(165, 247, 30, 30));
+        poolRects.add(new Rectangle(343,247, 30, 30));
+        poolRects.add(new Rectangle(583, 247, 30, 30));
+
+        poolRects.add(new Rectangle(163, 408, 30, 30));
+        poolRects.add(new Rectangle(465, 408, 30, 30));
+        poolRects.add(new Rectangle(703, 408, 30, 30));
+
+
+        // Initialize data structures
+        for (int i = 0; i < houseRects.size(); i++) {
+            houseNumbers.add("");
+        }
+        for (int i = 0; i < pointCircleRects.size(); i++) {
+            pointCirclesCrossedOff.add(false);
+        }
+        for (int i = 0; i < poolRects.size(); i++) {
+            poolsMarked.add(false);
+        }
+
+        // Set up the mouse listener for user interaction
+        addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                if (SwingUtilities.isLeftMouseButton(e)) {
+                    lineStartPoint = e.getPoint();
+                } else {
+                    handleMouseClick(e);
+                }
+            }
+
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                if (SwingUtilities.isLeftMouseButton(e) && lineStartPoint != null) {
+                    Point lineEndPoint = e.getPoint();
+                    drawnLines.add(new LineSegment(lineStartPoint, lineEndPoint, currentLineThickness));
+                    lineStartPoint = null;
+                    repaint();
+                }
+            }
+        });
+
+        // Set the preferred size of the panel
+        int mainImageWidth = (backgroundImage != null) ? backgroundImage.getWidth() : 800;
+        int preferredWidth = mainImageWidth + cardAreaPaddingLeft + (cardDisplayWidth * 2) + padding + cardAreaPaddingLeft;
+
+        int requiredHeightForCards = (cardDisplayHeight * NUM_CARDS_TO_DISPLAY) + (padding * (NUM_CARDS_TO_DISPLAY + 1));
+        int preferredHeight = Math.max(mainImageWidth, requiredHeightForCards); // Typo corrected from mainImageWidth to mainImageHeight if that was intended
+
+        setPreferredSize(new Dimension(preferredWidth, preferredHeight));
+    }
+
+    /**
+     * Loads all action cards and attempts to find their corresponding point cards
+     * based on a naming convention, then stores them as GameCard objects.
+     * Assumes action cards are named `[number]_[type].png` (e.g., "9_Market.png")
+     * and point cards are named `B_[type].png` (e.g., "B_Market.png").
+     */
+    private void loadAllGameCards() {
+        allGameCards.clear();
+        Map<String, BufferedImage> pointImageMap = new HashMap<>();
+
+        // First, load all point images into a map for easy lookup by type
+        List<String> pointFilePaths = getPngFilePaths(pointImageFolderPath);
+        for (String path : pointFilePaths) {
+            File file = new File(path);
+            String fileName = file.getName(); // e.g., "B_Market.png"
+            if (fileName.startsWith("B_") && fileName.toLowerCase().endsWith(".png")) { // Use toLowerCase for robustness
+                String type = fileName.substring(2, fileName.length() - 4); // Extract "Market"
+                try {
+                    BufferedImage img = ImageIO.read(file);
+                    if (img != null) {
+                        pointImageMap.put(type, img);
+                        System.out.println("Loaded point card: " + type);
+                    }
+                } catch (IOException ex) {
+                    System.err.println("Error loading point image: " + path + " - " + ex.getMessage());
+                }
+            } else {
+                System.out.println("Skipping non-standard point image file: " + fileName);
+            }
+        }
+
+        // Now, load action images and pair them with point images
+        List<String> supplementaryFilePaths = getPngFilePaths(supplementaryImageFolderPath);
+        for (String path : supplementaryFilePaths) {
+            File file = new File(path);
+            String fileName = file.getName(); // e.g., "9_Market.png"
+            if (fileName.contains("_") && fileName.toLowerCase().endsWith(".png")) { // Use toLowerCase for robustness
+                // Assuming format: [number]_[type].png
+                String type = fileName.substring(fileName.indexOf('_') + 1, fileName.length() - 4); // Extract "Market"
+                BufferedImage actionImg = null;
+                try {
+                    actionImg = ImageIO.read(file);
+                } catch (IOException ex) {
+                    System.err.println("Error loading action image: " + path + " - " + ex.getMessage());
+                }
+
+                if (actionImg != null) {
+                    BufferedImage pointImg = pointImageMap.get(type);
+                    if (pointImg != null) {
+                        allGameCards.add(new GameCard(actionImg, pointImg, type));
+                        System.out.println("Paired action card '" + fileName + "' with point card for type '" + type + "'");
+                    } else {
+                        System.out.println("No matching point card found for action card type: " + type + " from file: " + fileName + ". Using null for point face.");
+                        // Add with a null point card if no match, so action card can still be used.
+                        allGameCards.add(new GameCard(actionImg, null, type));
+                    }
+                }
+            } else {
+                System.out.println("Skipping non-standard action image file: " + fileName);
+            }
+        }
+    }
+
+    /**
+     * Deals initial action cards to the left column.
+     * Point cards remain empty initially.
+     */
+    private void dealInitialCards() {
+        currentActionCards.clear();
+        currentPointCards.clear(); // Ensure point cards are empty initially
+
+        if (allGameCards.isEmpty()) {
+            return;
+        }
+
+        List<GameCard> shuffledList = new ArrayList<>(allGameCards);
+        Collections.shuffle(shuffledList);
+
+        for (int i = 0; i < NUM_CARDS_TO_DISPLAY && i < shuffledList.size(); i++) {
+            currentActionCards.add(shuffledList.get(i));
+        }
+    }
+
+    /**
+     * Performs the "flip" action:
+     * 1. Moves the point faces of the current action cards to the right column.
+     * 2. Deals new action cards to the left column.
+     */
+    private void flipAndDealNewCards() {
+        if (allGameCards.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "No cards loaded! Please check image folders and naming conventions.", "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // 1. Move point faces of current action cards to currentPointCards
+        currentPointCards.clear();
+        for (GameCard card : currentActionCards) {
+            currentPointCards.add(card); // Add the whole GameCard, we'll draw its pointFace later
+        }
+
+        // 2. Deal new action cards for the left column
+        currentActionCards.clear();
+        List<GameCard> shuffledList = new ArrayList<>(allGameCards);
+        Collections.shuffle(shuffledList);
+        for (int i = 0; i < NUM_CARDS_TO_DISPLAY && i < shuffledList.size(); i++) {
+            currentActionCards.add(shuffledList.get(i));
+        }
+        repaint();
+    }
+
+    /**
+     * Resets the game board to its initial state:
+     * Clears all markings, lines, house numbers, and deals new action cards.
+     */
+    private void shuffleAndResetGame() {
+        // Clear all interactive elements
+        houseNumbers.clear();
+        for (int i = 0; i < houseRects.size(); i++) {
+            houseNumbers.add(""); // Reset house numbers to empty
+        }
+        Collections.fill(pointCirclesCrossedOff, false); // Uncross all point circles
+        Collections.fill(poolsMarked, false); // Unmark all pools
+        drawnLines.clear(); // Clear all drawn lines
+
+        // Reset card display to initial state (action cards on left, empty right)
+        dealInitialCards(); // This will deal new action cards and clear point cards
+        repaint();
+    }
+
+    // Method to handle mouse click events (for houses, point circles, and pools)
+    private void handleMouseClick(MouseEvent e) {
+        Point clickPoint = e.getPoint();
+
+        // Check for house clicks
+        for (int i = 0; i < houseRects.size(); i++) {
+            if (houseRects.get(i).contains(clickPoint)) {
+                if (currentlyEditingHouse && editingHouseIndex == i) {
+                    currentlyEditingHouse = false;
+                    editingHouseIndex = -1;
+                } else {
+                    currentlyEditingHouse = true;
+                    editingHouseIndex = i;
+                    String input = JOptionPane.showInputDialog(this, "Enter number for house:", houseNumbers.get(i));
+                    if (input != null) {
+                        houseNumbers.set(i, input);
+                    }
+                    currentlyEditingHouse = false;
+                    editingHouseIndex = -1;
+                }
+                repaint();
+                return;
+            }
+        }
+
+        // Check for point circle clicks
+        for (int i = 0; i < pointCircleRects.size(); i++) {
+            if (pointCircleRects.get(i).contains(clickPoint)) {
+                pointCirclesCrossedOff.set(i, !pointCirclesCrossedOff.get(i));
+                repaint();
+                return;
+            }
+        }
+
+        // Check for pool clicks
+        for (int i = 0; i < poolRects.size(); i++) {
+            if (poolRects.get(i).contains(clickPoint)) {
+                poolsMarked.set(i, !poolsMarked.get(i));
+                repaint();
+                return;
+            }
+        }
+    }
+
+    // Method to draw the game board and its elements
+    @Override
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+        Graphics2D g2d = (Graphics2D) g;
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+        int mainImageWidth = (backgroundImage != null) ? backgroundImage.getWidth() : 800;
+        int supplementaryAreaStartX = mainImageWidth;
+        int supplementaryAreaHeight = getHeight();
+
+        // Draw the background image (main game board)
+        if (backgroundImage != null) {
+            g2d.drawImage(backgroundImage, 0, 0, this);
+        } else {
+            g2d.setColor(Color.LIGHT_GRAY);
+            g2d.fillRect(0, 0, supplementaryAreaStartX, getHeight());
+            g2d.setColor(Color.BLACK);
+            g2d.drawString("Main Board Image Not Loaded", 10, 20);
+        }
+
+        // Calculate common Y position for both sets of cards (centered vertically)
+        int totalCardsHeight = (cardDisplayHeight * NUM_CARDS_TO_DISPLAY) + (padding * (NUM_CARDS_TO_DISPLAY - 1));
+        if (NUM_CARDS_TO_DISPLAY == 0) totalCardsHeight = 0;
+
+        int currentY = (supplementaryAreaHeight - totalCardsHeight) / 2;
+        if (currentY < padding) currentY = padding;
+
+        // Draw the blank space background (behind the cards)
+        int actualSupplementaryWidth = cardAreaPaddingLeft + (cardDisplayWidth * 2) + padding + cardAreaPaddingLeft;
+        g2d.setColor(Color.LIGHT_GRAY);
+        g2d.fillRect(supplementaryAreaStartX, 0, actualSupplementaryWidth, supplementaryAreaHeight);
+
+
+        // --- Draw the current action cards (left column) ---
+        int startXForActionCards = supplementaryAreaStartX + cardAreaPaddingLeft;
+        int tempY = currentY; // Use a temporary Y for drawing to keep currentY for the next column
+        for (GameCard card : currentActionCards) {
+            if (card.getActionFace() != null) {
+                g2d.drawImage(card.getActionFace(), startXForActionCards, tempY, cardDisplayWidth, cardDisplayHeight, this);
+            } else {
+                g2d.setColor(Color.RED);
+                g2d.drawString("No Action Image", startXForActionCards + 10, tempY + cardDisplayHeight / 2);
+            }
+            tempY += cardDisplayHeight + padding;
+        }
+
+        // --- Draw the current point cards (right column) ---
+        int startXForPointCards = startXForActionCards + cardDisplayWidth + padding;
+        tempY = currentY; // Reset Y position for point cards to align with action cards
+        for (GameCard card : currentPointCards) {
+            if (card.getPointFace() != null) {
+                g2d.drawImage(card.getPointFace(), startXForPointCards, tempY, cardDisplayWidth, cardDisplayHeight, this);
+            } else {
+                g2d.setColor(Color.RED);
+                g2d.drawString("No Point Image", startXForPointCards + 10, tempY + cardDisplayHeight / 2);
+                // System.out.println("Warning: Attempted to draw null point face for type: " + card.getType()); // Keep for debugging if needed
+            }
+            tempY += cardDisplayHeight + padding;
+        }
+
+
+        // Draw the houses and numbers
+        g2d.setFont(houseFont);
+        for (int i = 0; i < houseRects.size(); i++) {
+            Rectangle rect = houseRects.get(i);
+            g2d.setColor(Color.BLACK);
+            String number = houseNumbers.get(i);
+            FontMetrics fm = g2d.getFontMetrics();
+            int x = rect.x + (rect.width - fm.stringWidth(number)) / 2;
+            int y = rect.y + ((rect.height - fm.getHeight()) / 2) + fm.getAscent();
+            g2d.drawString(number, x, y);
+        }
+
+        // Draw the point circles (only the "X" if crossed off)
+        for (int i = 0; i < pointCircleRects.size(); i++) {
+            Rectangle rect = pointCircleRects.get(i);
+            if (pointCirclesCrossedOff.get(i)) {
+                g2d.setColor(Color.RED);
+                g2d.drawLine(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
+                g2d.drawLine(rect.x, rect.y + rect.height, rect.x + rect.width, rect.y);
+            }
+        }
+
+        // Draw the pools
+        g2d.setColor(Color.BLUE);
+        for (int i = 0; i < poolRects.size(); i++) {
+            Rectangle rect = poolRects.get(i);
+            if (poolsMarked.get(i)) {
+                g2d.draw(new Ellipse2D.Double(rect.x, rect.y, rect.width, rect.height));
+            }
+        }
+
+        // Draw the lines
+        g2d.setColor(Color.BLACK);
+        for (LineSegment line : drawnLines) {
+            g2d.setStroke(new BasicStroke(line.thickness, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g2d.drawLine(line.start.x, line.start.y, line.end.x, line.end.y);
+        }
+
+        // Reset stroke to default for other drawings
+        g2d.setStroke(new BasicStroke());
+    }
+
+    // Method to create and show the JFrame
+    public void createAndShowGUI() {
+        frame = new JFrame("Welcome To... Game Board");
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setResizable(false);
+        frame.setLocationRelativeTo(null);
+
+        JPanel controlPanel = new JPanel();
+        JLabel thicknessLabel = new JLabel("Line Thickness:");
+        SpinnerNumberModel spinnerModel = new SpinnerNumberModel(currentLineThickness, 1, 20, 1);
+        JSpinner thicknessSpinner = new JSpinner(spinnerModel);
+        thicknessSpinner.addChangeListener(e -> {
+            currentLineThickness = (int) thicknessSpinner.getValue();
+        });
+        controlPanel.add(thicknessLabel);
+        controlPanel.add(thicknessSpinner);
+
+        JButton newRoundButton = new JButton("New Round (Flip & Deal)");
+        newRoundButton.addActionListener(e -> {
+            flipAndDealNewCards();
+        });
+        controlPanel.add(newRoundButton);
+
+        // New button: Shuffle and Reset
+        JButton shuffleResetButton = new JButton("Shuffle and Reset Board");
+        shuffleResetButton.addActionListener(e -> {
+            shuffleAndResetGame();
+        });
+        controlPanel.add(shuffleResetButton);
+
+        frame.add(controlPanel, BorderLayout.NORTH);
+        frame.add(this, BorderLayout.CENTER);
+
+        frame.pack();
+        frame.setVisible(true);
+    }
+
+    // Main method to run the application
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            App app = new App();
+            app.createAndShowGUI();
+        });
+    }
+} 
